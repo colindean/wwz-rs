@@ -1,10 +1,13 @@
 #![deny(warnings)]
-use std::path::Path;
+use std::{net::IpAddr, path::Path};
 use std::fs::File;
 //use mini_fs::zip::ZipFs;
 use warp::Filter;
 //use mini_fs::prelude::*;
-use mini_fs::{MiniFs, ZipFs, Store};
+use mini_fs::{MiniFs, ZipFs, Store, Entry};
+
+// warp wants it like this
+const LOCALHOST: IpAddr = [127, 0, 0, 1].into();
 
 #[tokio::main]
 async fn main() {
@@ -27,23 +30,22 @@ async fn main() {
     let zip = warp::get()
         .and(warp::path("zip"))
         .map(|| 
-            get_zipentries_at_path(&minifs, Path::new("/zip/")).map_or_else("", 
+            get_zipentries_at_path(&minifs, Path::new("/zip/")).map_or_else(
+       |_error | String::default(), 
             |files|
                 files
-                .iter()
-                .map(|osstr| osstr.into_string().unwrap())
-                .collect()
-                .join("\n")
-        )
+                    .join("\n")
+            )
         );
-//        .and(zipfs.entries());
 
     // GET / => README.md
     // GET /ex/... => ./examples/..
     let routes = readme.or(examples).or(zip);
 
-    warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
+    warp::serve(routes).run((LOCALHOST, 3030)).await;
 }
+
+
 
 
 // read zip
@@ -63,18 +65,21 @@ fn get_zippath() -> Option<String> {
 
 use std::io;
 
+fn extract_entry_name(entry: &Entry) -> Option<String> {
+    Some(entry.name.into_string().unwrap())
+}
+
 fn get_zipentries_at_path(minifs: &MiniFs, path: &Path) -> io::Result<Vec<String>> {
     minifs
-            .entries_path(Path::new("/zip/"))
-            .map(|list|
-                list
-                    .map(|maybeEntry|
-                        maybeEntry.map(|entry|
-                            entry.name.into_string()
-                        )
-                    )
-                    .collect()
-
-            )
-            .map(|fd| fd.collect())
+        .entries_path(Path::new("/zip/")) // TODO: add path
+        .map(|list|
+            list
+                .filter_map(|maybeEntry|
+                    maybeEntry
+                        .map(|entry| extract_entry_name(&entry))
+                        .unwrap()
+                )
+        )
+        .map(|fd| Ok(fd.collect::<Vec<String>>()))
+        .unwrap()
 }
